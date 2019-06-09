@@ -1,0 +1,137 @@
+量化 ZIG函数的python实现
+技术标签： 量化  zig
+
+来自某百科的定义，ZIG(K,N) 函数当数值K的变化量超过N%时折线转向。
+
+本文只考虑收盘价（close）的5%转向。
+
+先上图，直观感受下ZIG线（白线）
+
+
+
+所以给定日线收盘价序列，要求出其ZIG线；
+
+大体思路如下：
+
+（x = 0.05即5%转向）
+
+若是上涨趋势:
+
+    扫描点的值若大于现在候选节点的值，则把候选点置为扫描点；
+
+    扫描点的值若小于现在候选节点的值*(1-x), 则说明当前候选点是个∧端点，将其记入端点表。并且将当前趋势设为下降趋势，将候选点置为扫描点。
+
+若是下降趋势：
+
+    扫面点的值若小于现在候选节点的值，则把候选点置为扫描点；
+
+    扫描点的值若大于现在候选节点的值*(1+x), 则说明当前候选点是个∨端点，将其记入端点表。并且将当前趋势设为上涨趋势，将候选点置为扫描点。
+
+其他的还有临界判断，便不赘述了，上个示例代码：
+
+import numpy as np
+import tushare as ts
+ 
+ZIG_STATE_START = 0
+ZIG_STATE_RISE = 1
+ZIG_STATE_FALL = 2
+ 
+ 
+def zig():
+    ts.set_token("此处放入tushare的token！！！")
+    pro = ts.pro_api()
+    df = pro.daily(ts_code="603297.SH")
+    # print(list(df["close"]))
+    df = df[::-1]
+    df = df.reset_index(drop=True)
+    # df = df.iloc[-100:]
+    x = 0.05
+    k = df["close"]
+    d = df["trade_date"]
+    print(k)
+    print(d)
+    peer_i = 0
+    candidate_i = None
+    scan_i = 0
+    peers = [0]
+    z = np.zeros(len(k))
+    state = ZIG_STATE_START
+    while True:
+        print(peers)
+        scan_i += 1
+        if scan_i == len(k) - 1:
+            # 扫描到尾部
+            if candidate_i is None:
+                peer_i = scan_i
+                peers.append(peer_i)
+            else:
+                if state == ZIG_STATE_RISE:
+                    if k[scan_i] >= k[candidate_i]:
+                        peer_i = scan_i
+                        peers.append(peer_i)
+                    else:
+                        peer_i = candidate_i
+                        peers.append(peer_i)
+                        peer_i = scan_i
+                        peers.append(peer_i)
+                elif state == ZIG_STATE_FALL:
+                    if k[scan_i] <= k[candidate_i]:
+                        peer_i = scan_i
+                        peers.append(peer_i)
+                    else:
+                        peer_i = candidate_i
+                        peers.append(peer_i)
+                        peer_i = scan_i
+                        peers.append(peer_i)
+            break
+ 
+        if state == ZIG_STATE_START:
+            if k[scan_i] >= k[peer_i] * (1 + x):
+                candidate_i = scan_i
+                state = ZIG_STATE_RISE
+            elif k[scan_i] <= k[peer_i] * (1 - x):
+                candidate_i = scan_i
+                state = ZIG_STATE_FALL
+        elif state == ZIG_STATE_RISE:
+            if k[scan_i] >= k[candidate_i]:
+                candidate_i = scan_i
+            elif k[scan_i] <= k[candidate_i]*(1-x):
+                peer_i = candidate_i
+                peers.append(peer_i)
+                state = ZIG_STATE_FALL
+                candidate_i = scan_i
+        elif state == ZIG_STATE_FALL:
+            if k[scan_i] <= k[candidate_i]:
+                candidate_i = scan_i
+            elif k[scan_i] >= k[candidate_i]*(1+x):
+                peer_i = candidate_i
+                peers.append(peer_i)
+                state = ZIG_STATE_RISE
+                candidate_i = scan_i
+    for i in range(len(peers) - 1):
+        peer_start_i = peers[i]
+        peer_end_i = peers[i+1]
+        start_value = k[peer_start_i]
+        end_value = k[peer_end_i]
+        a = (end_value - start_value)/(peer_end_i - peer_start_i)# 斜率
+        for j in range(peer_end_i - peer_start_i +1):
+            z[j + peer_start_i] = start_value + a*j
+    print(peers)
+    dates = [d[i] for i in peers]
+    print(dates)
+    print([k[i] for i in peers])
+    print(list(k))
+    print(list(z))
+ 
+ 
+zig()
+    最终输出如下：
+
+[0, 6, 18, 21, 22, 27, 30, 32]
+['20180910', '20180918', '20181012', '20181017', '20181018', '20181025', '20181030', '20181101']
+[37.25, 62.7, 44.88, 47.81, 43.6, 48.76, 46.0, 46.75]
+[37.25, 40.98, 45.08, 49.59, 54.55, 57.0, 62.7, 61.6, 59.23, 58.84, 59.29, 60.9, 55.51, 55.65, 50.15, 50.3, 51.16, 46.04, 44.88, 45.81, 46.45, 47.81, 43.6, 45.84, 47.99, 48.37, 47.01, 48.76, 47.85, 47.69, 46.0, 47.1, 46.75]
+[37.25, 41.49166666666667, 45.733333333333334, 49.975, 54.21666666666667, 58.458333333333336, 62.7, 61.215, 59.730000000000004, 58.245000000000005, 56.760000000000005, 55.275000000000006, 53.790000000000006, 52.305, 50.82, 49.335, 47.85, 46.365, 44.88, 45.85666666666667, 46.833333333333336, 47.81, 43.6, 44.632, 45.664, 46.696, 47.728, 48.76, 47.839999999999996, 46.92, 46.0, 46.375, 46.75]
+最后print出来的z便是ZIG线。此代码并没有做最终的封装，仅为示例。
+
+ps:某百科描述的算法是错的，坑爹
